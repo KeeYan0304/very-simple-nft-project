@@ -19,8 +19,6 @@ const signer = provider.getSigner();
 // get the smart contract
 const contract = new ethers.Contract(contractAddress, FreeGuy.abi, signer);
 
-const address = await provider.getSigner().getAddress();
-
 let mintPrice = 1; //global var
 
 function Home() {
@@ -49,10 +47,14 @@ function Home() {
         console.log('checkMintPrice: ' + mintPrice);
     };
 
+    const address = async () => {
+        return await provider.getSigner().getAddress();
+    }
+
     return (
         <div>
             <div>
-                <h2>Wallet Address: {address}</h2>
+                {/* <h2>Wallet Address: {address}</h2> */}
             </div>
             <div style={{ marginTop: "20px" }}>
                 <WalletBalance />

@@ -1,23 +1,24 @@
 import Install from './components/Install'
 import { useState, useEffect } from 'react';
 import { ethers } from 'ethers';
-import React, { lazy, Suspense } from 'react';
-import ErrorBoundary from "./components/ErrorBoundary";
+// import React, { lazy, Suspense } from 'react';
+import Home from "./components/Home";
+// import ErrorBoundary from "./components/ErrorBoundary";
 
-const Home = lazy(() => import('./components/Home'));
-function loadComponent(name) {
-  const Component = React.lazy(() =>
-    import(`./components/Home.jsx`)
-  );
-  return Component;
-}
+// const Home = lazy(() => import('./components/Home'));
+// function loadComponent(name) {
+//   const Component = React.lazy(() =>
+//     import(`./components/Home.jsx`)
+//   );
+//   return Component;
+// }
 
 function App() {
   const [errorMessage, setErrorMessage] = useState(null);
   const [account, setAccount] = useState(null);
 
-  const componentNumber = 2;
-  const Component = loadComponent(componentNumber);
+  // const componentNumber = 2;
+  // const Component = loadComponent(componentNumber);
 
   useEffect(() => {
     if (window.ethereum) {
@@ -29,7 +30,6 @@ function App() {
   const chainChanged = () => {
     setErrorMessage(null);
     setAccount(null);
-    setBalance(null);
   };
 
   const accountsChanged = async (newAccount) => {
@@ -60,16 +60,10 @@ function App() {
 
   return (
     <div>
-      <section>
       <button onClick={connectHandler}>Connect Account</button>
       {account != null &&
-        <Suspense fallback={<div>Loading...</div>}>
-        <ErrorBoundary>
-          <Component />
-        </ErrorBoundary>
-      </Suspense>
+        <Home />
       }
-      </section>
     </div>
   )
 }
