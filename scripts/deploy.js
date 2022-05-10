@@ -4,6 +4,7 @@
 // When running the script with `npx hardhat run <script>` you'll find the Hardhat
 // Runtime Environment's members available in the global scope.
 const hre = require("hardhat");
+const NAME = "FreeGuy"
 
 async function main() {
   // Hardhat always runs the compile task when running scripts with its command
@@ -14,10 +15,15 @@ async function main() {
   // await hre.run('compile');
 
   // We get the contract to deploy
-  const FreeGuy = await hre.ethers.getContractFactory("FreeGuy");
-  const freeGuy = await FreeGuy.deploy();
+  const NFT = await hre.ethers.getContractFactory(NAME);
+  const contract = await NFT.deploy(
+    'MetaBlindBox',
+    '',
+    'MBB',
+    'ipfs://QmZS5cJ1b6W1n9QtiNj9NuwV1hjPnvJjHqxdJmeGEHe2qV'
+  );
 
-  await freeGuy.deployed();
+  await contract.deployed();
   
   console.log("Contract deployed to:", freeGuy.address); //run smart contract on local machine
 }
