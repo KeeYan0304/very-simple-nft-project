@@ -7,6 +7,7 @@ import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
 import "@openzeppelin/contracts/utils/Strings.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
 import "@chainlink/contracts/src/v0.8/VRFConsumerBaseV2.sol";
 
@@ -36,10 +37,6 @@ contract MetaBlindBox is
 
     string public baseURI;
     string public baseExtension = ".json";
-    string public notRevealedURI;
-
-    string public constant NFT_PROVENANCE_HASH =
-        "59b3ce2eab81c2d7bbd4184b82e51edce17b28e8243a3a247c7ae15aca288b4f";
 
     uint256[] private _randomTokenNumber;
 
@@ -63,23 +60,21 @@ contract MetaBlindBox is
     address s_owner;
 
     using Counters for Counters.Counter;
+    using SafeMath for uint256;
+
     Counters.Counter private _tokenIdCounter;
 
     constructor(
         uint64 subscriptionId,
         string memory _name,
         string memory _initBaseURI,
-        string memory _symbol,
-        string memory _initNotRevealedURI
-    ) VRFConsumerBaseV2(vrfCoordinator) ERC721(_name, _symbol) {
+        string memory _symbol
+    ) ERC721(_name, _symbol) VRFConsumerBaseV2(vrfCoordinator) {
         setBaseURI(_initBaseURI);
-        setNotRevealedURI(_initNotRevealedURI);
         COORDINATOR = VRFCoordinatorV2Interface(vrfCoordinator);
         s_owner = msg.sender;
         s_subscriptionId = subscriptionId;
-        for (uint256 i = 1; i <= MAX_TOKENS_SUPPLY; i++) {
-            _randomTokenNumber.push(i);
-        }
+        setInitialIndex();
     }
 
     // Assumes the subscription is funded sufficiently.
@@ -136,8 +131,16 @@ contract MetaBlindBox is
         super._burn(tokenId);
     }
 
-    function setNotRevealedURI(string memory _notRevealedURI) public onlyOwner {
-        notRevealedURI = _notRevealedURI;
+    uint256 private _initialIndex;
+
+    function setInitialIndex() public payable onlyOwner {
+        require(_initialIndex == 0, "Starting index is already set");
+
+        _initialIndex = s_requestId % MAX_TOKENS_SUPPLY;
+
+        if (_initialIndex == 0) {
+            _initialIndex = _initialIndex.add(1);
+        }
     }
 
     function tokenURI(uint256 tokenId)
@@ -151,6 +154,7 @@ contract MetaBlindBox is
             "ERC721Metadata: URI query for nonexistent token"
         );
         string memory currentBaseURI = _baseURI();
+        string memory seqId;
         if (tokenId <= MAX_FIRST_BATCH) {
             if (
                 _first_batch_reveal_date != 0 &&
@@ -167,7 +171,30 @@ contract MetaBlindBox is
                         )
                         : "";
             } else {
-                return notRevealedURI;
+                if (block.timestamp >= firstReleaseDate) {
+                    
+                    seqId = Strings.toString((tokenId + _initialIndex) % MAX_FIRST_BATCH);
+                    return
+                    bytes(currentBaseURI).length > 0
+                        ? string(
+                            abi.encodePacked(
+                                currentBaseURI,
+                                seqId,
+                                baseExtension
+                            )
+                        )
+                        : "";
+                } 
+                return
+                    bytes(currentBaseURI).length > 0
+                        ? string(
+                            abi.encodePacked(
+                                currentBaseURI,
+                                "-1",
+                                baseExtension
+                            )
+                        )
+                        : "";
             }
         } else if (tokenId > MAX_FIRST_BATCH && tokenId < MAX_SEC_BATCH) {
             if (
@@ -185,7 +212,29 @@ contract MetaBlindBox is
                         )
                         : "";
             } else {
-                return notRevealedURI;
+                if (block.timestamp >= secReleaseDate) {
+                    seqId = Strings.toString((tokenId + _initialIndex) % (MAX_FIRST_BATCH + MAX_SEC_BATCH));
+                    return
+                    bytes(currentBaseURI).length > 0
+                        ? string(
+                            abi.encodePacked(
+                                currentBaseURI,
+                                seqId,
+                                baseExtension
+                            )
+                        )
+                        : "";
+                } 
+                return
+                    bytes(currentBaseURI).length > 0
+                        ? string(
+                            abi.encodePacked(
+                                currentBaseURI,
+                                "-1",
+                                baseExtension
+                            )
+                        )
+                        : "";
             }
         } else {
             if (
@@ -203,7 +252,29 @@ contract MetaBlindBox is
                         )
                         : "";
             } else {
-                return notRevealedURI;
+                if (block.timestamp >= thirdReleaseDate) {
+                    seqId = Strings.toString((tokenId + _initialIndex) % MAX_TOKENS_SUPPLY);
+                    return
+                    bytes(currentBaseURI).length > 0
+                        ? string(
+                            abi.encodePacked(
+                                currentBaseURI,
+                                seqId,
+                                baseExtension
+                            )
+                        )
+                        : "";
+                } 
+                return
+                    bytes(currentBaseURI).length > 0
+                        ? string(
+                            abi.encodePacked(
+                                currentBaseURI,
+                                "-1",
+                                baseExtension
+                            )
+                        )
+                        : "";
             }
         }
     }
@@ -229,17 +300,18 @@ contract MetaBlindBox is
             availableSupply = MAX_FIRST_BATCH + MAX_SEC_BATCH + MAX_THIRD_BATCH;
         }
         require(_tokenIdCounter.current() < availableSupply, "Sales ended");
-        uint256 randomIndex = (requestRandomId() % availableSupply) + 1;
+        // uint256 randomIndex = (requestRandomId() % availableSupply) + 1;
 
-        uint256 newTokenId = _randomTokenNumber[randomIndex];
+        // uint256 newTokenId = _randomTokenNumber[randomIndex];
 
-        _randomTokenNumber[randomIndex] = _randomTokenNumber[
-            _randomTokenNumber.length - 1
-        ];
+        // _randomTokenNumber[randomIndex] = _randomTokenNumber[
+        //     _randomTokenNumber.length - 1
+        // ];
 
-        _randomTokenNumber.pop();
-        _safeMint(_to, newTokenId);
+        // _randomTokenNumber.pop();
+        uint256 newTokenId = _tokenIdCounter.current();
         _tokenIdCounter.increment();
+        _safeMint(_to, newTokenId);
 
         if (newTokenId <= MAX_FIRST_BATCH) {
             _sold_first_batch_count += 1;
@@ -272,9 +344,5 @@ contract MetaBlindBox is
         }
 
         return tokensId;
-    }
-
-    function withdraw() public onlyOwner {
-        payable(owner()).transfer(address(this).balance);
     }
 }

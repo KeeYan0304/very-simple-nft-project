@@ -17,10 +17,10 @@ async function main() {
   // We get the contract to deploy
   const NFT = await hre.ethers.getContractFactory(NAME);
   const contract = await NFT.deploy(
-    'MetaBlindBox',
-    '',
+    4013,
+    'MetaBlinbBox',
+    'ipfs://QmZS5cJ1b6W1n9QtiNj9NuwV1hjPnvJjHqxdJmeGEHe2qV',
     'MBB',
-    'ipfs://QmZS5cJ1b6W1n9QtiNj9NuwV1hjPnvJjHqxdJmeGEHe2qV'
   );
 
   await contract.deployed();
