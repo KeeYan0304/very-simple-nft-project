@@ -38,6 +38,9 @@ contract MetaBlindBox is
     string public baseURI;
     string public baseExtension = ".json";
 
+    string public constant NFT_PROVENANCE_HASH =
+        "59b3ce2eab81c2d7bbd4184b82e51edce17b28e8243a3a247c7ae15aca288b4f";
+
     uint256[] private _randomTokenNumber;
 
     VRFCoordinatorV2Interface COORDINATOR;
@@ -74,6 +77,17 @@ contract MetaBlindBox is
         COORDINATOR = VRFCoordinatorV2Interface(vrfCoordinator);
         s_owner = msg.sender;
         s_subscriptionId = subscriptionId;
+        createNewSubscription();
+    }
+
+    // Create a new subscription when the contract is initially deployed.
+    function createNewSubscription() private onlyOwner {
+        // Create a subscription with a new subscription ID.
+        address[] memory consumers = new address[](1);
+        consumers[0] = address(this);
+        s_subscriptionId = COORDINATOR.createSubscription();
+        // Add this contract as a consumer of its own subscription.
+        COORDINATOR.addConsumer(s_subscriptionId, consumers[0]);
         setInitialIndex();
     }
 
@@ -172,19 +186,20 @@ contract MetaBlindBox is
                         : "";
             } else {
                 if (block.timestamp >= firstReleaseDate) {
-                    
-                    seqId = Strings.toString((tokenId + _initialIndex) % MAX_FIRST_BATCH);
+                    seqId = Strings.toString(
+                        (tokenId + _initialIndex) % MAX_FIRST_BATCH
+                    );
                     return
-                    bytes(currentBaseURI).length > 0
-                        ? string(
-                            abi.encodePacked(
-                                currentBaseURI,
-                                seqId,
-                                baseExtension
+                        bytes(currentBaseURI).length > 0
+                            ? string(
+                                abi.encodePacked(
+                                    currentBaseURI,
+                                    seqId,
+                                    baseExtension
+                                )
                             )
-                        )
-                        : "";
-                } 
+                            : "";
+                }
                 return
                     bytes(currentBaseURI).length > 0
                         ? string(
@@ -213,18 +228,21 @@ contract MetaBlindBox is
                         : "";
             } else {
                 if (block.timestamp >= secReleaseDate) {
-                    seqId = Strings.toString((tokenId + _initialIndex) % (MAX_FIRST_BATCH + MAX_SEC_BATCH));
+                    seqId = Strings.toString(
+                        (tokenId + _initialIndex) %
+                            (MAX_FIRST_BATCH + MAX_SEC_BATCH)
+                    );
                     return
-                    bytes(currentBaseURI).length > 0
-                        ? string(
-                            abi.encodePacked(
-                                currentBaseURI,
-                                seqId,
-                                baseExtension
+                        bytes(currentBaseURI).length > 0
+                            ? string(
+                                abi.encodePacked(
+                                    currentBaseURI,
+                                    seqId,
+                                    baseExtension
+                                )
                             )
-                        )
-                        : "";
-                } 
+                            : "";
+                }
                 return
                     bytes(currentBaseURI).length > 0
                         ? string(
@@ -253,18 +271,20 @@ contract MetaBlindBox is
                         : "";
             } else {
                 if (block.timestamp >= thirdReleaseDate) {
-                    seqId = Strings.toString((tokenId + _initialIndex) % MAX_TOKENS_SUPPLY);
+                    seqId = Strings.toString(
+                        (tokenId + _initialIndex) % MAX_TOKENS_SUPPLY
+                    );
                     return
-                    bytes(currentBaseURI).length > 0
-                        ? string(
-                            abi.encodePacked(
-                                currentBaseURI,
-                                seqId,
-                                baseExtension
+                        bytes(currentBaseURI).length > 0
+                            ? string(
+                                abi.encodePacked(
+                                    currentBaseURI,
+                                    seqId,
+                                    baseExtension
+                                )
                             )
-                        )
-                        : "";
-                } 
+                            : "";
+                }
                 return
                     bytes(currentBaseURI).length > 0
                         ? string(
