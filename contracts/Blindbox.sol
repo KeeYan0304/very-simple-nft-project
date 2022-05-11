@@ -38,9 +38,6 @@ contract MetaBlindBox is
     string public baseURI;
     string public baseExtension = ".json";
 
-    string public constant NFT_PROVENANCE_HASH =
-        "59b3ce2eab81c2d7bbd4184b82e51edce17b28e8243a3a247c7ae15aca288b4f";
-
     uint256[] private _randomTokenNumber;
 
     VRFCoordinatorV2Interface COORDINATOR;
