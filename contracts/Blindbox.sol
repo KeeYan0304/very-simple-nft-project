@@ -2,156 +2,163 @@
 pragma solidity ^0.8.4;
 
 import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
-import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/Counters.sol";
-import "@openzeppelin/contracts/utils/Strings.sol";
-import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "@chainlink/contracts/src/v0.8/interfaces/LinkTokenInterface.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
 import "@chainlink/contracts/src/v0.8/VRFConsumerBaseV2.sol";
+import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 
-contract MetaBlindBox is
-    ERC721,
-    ERC721Enumerable,
-    ERC721URIStorage,
-    Ownable,
-    VRFConsumerBaseV2
-{
-    uint256 public constant firstReleaseDate = 1655697600; //mid June
-    uint256 public constant secReleaseDate = 1656302400; // 1 week after 1st batch release
-    uint256 public constant thirdReleaseDate = 1656648000; // early July
-
-    uint256 private _sold_first_batch_count;
-    uint256 private _sold_sec_batch_count;
-    uint256 private _sold_third_batch_count;
-
-    uint256 public _first_batch_reveal_date;
-    uint256 public _sec_batch_reveal_date;
-    uint256 public _third_batch_reveal_date;
-
-    uint256 public constant MAX_FIRST_BATCH = 1111;
-    uint256 public constant MAX_SEC_BATCH = 2222;
-    uint256 public constant MAX_THIRD_BATCH = 4444;
-    uint256 public constant MAX_TOKENS_SUPPLY = 7777;
-
-    string public baseURI;
-    string public baseExtension = ".json";
-
-    uint256[] private _randomTokenNumber;
-
-    VRFCoordinatorV2Interface COORDINATOR;
-
-    uint64 s_subscriptionId;
-
-    address vrfCoordinator = 0x6168499c0cFfCaCD319c818142124B7A15E857ab;
-
-    bytes32 keyHash =
-        0xd89b2bf150e3b9e13446986e571fb9cab24b13cea0a43ea20a6049a85cc807cc;
-
-    uint32 callbackGasLimit = 100000;
-
-    uint16 requestConfirmations = 3;
-
-    uint32 numWords = 1;
-
-    uint256[] public s_randomWords;
-    uint256 public s_requestId;
-    address s_owner;
-
+contract NewMetaBox is ERC721, ERC721URIStorage, Ownable, VRFConsumerBaseV2 {
     using Counters for Counters.Counter;
     using SafeMath for uint256;
+
+    struct BatchGroup {
+        uint256 batchId;
+        uint256 quantity;
+        uint256 stock;
+        bool isReveal;
+    }
+
+    mapping(uint256 => BatchGroup) batchGroups;
+
+    uint256 public batchCount;
+    event SoldOut(uint256 indexed soldQuantity, uint256 soldOutTimeStamp);
+
+    uint256 public totalBoxes;
+    bool public isReveal;
+    string public baseURI;
+    uint256 public boxPrice;
+    bool public isSalesActive;
+    uint256 private _initialIndex;
+    string public baseExtension = ".json";
+
+    VRFCoordinatorV2Interface immutable COORDINATOR;
+    LinkTokenInterface immutable LINKTOKEN;
+    uint64 immutable s_subscriptionId;
+    bytes32 immutable s_keyHash;
+    uint32 immutable s_callbackGasLimit = 100000;
+    uint16 immutable s_requestConfirmations = 3;
+    uint32 immutable s_numWords = 1;
+    uint256 public s_requestId;
+    uint256[] public s_randomWords;
+
+    address s_owner;
 
     Counters.Counter private _tokenIdCounter;
 
     constructor(
         uint64 subscriptionId,
+        address vrfCoordinator,
+        address link,
+        bytes32 keyHash,
         string memory _name,
-        string memory _initBaseURI,
         string memory _symbol
-    ) ERC721(_name, _symbol) VRFConsumerBaseV2(vrfCoordinator) {
-        setBaseURI(_initBaseURI);
+    ) VRFConsumerBaseV2(vrfCoordinator) ERC721(_name, _symbol) {
+        batchCount = 0;
+        _tokenIdCounter.increment(); //starts with 1
         COORDINATOR = VRFCoordinatorV2Interface(vrfCoordinator);
+        LINKTOKEN = LinkTokenInterface(link);
+        s_keyHash = keyHash;
         s_owner = msg.sender;
         s_subscriptionId = subscriptionId;
-        createNewSubscription();
     }
 
-    // Create a new subscription when the contract is initially deployed.
-    function createNewSubscription() private onlyOwner {
-        // Create a subscription with a new subscription ID.
-        address[] memory consumers = new address[](1);
-        consumers[0] = address(this);
-        s_subscriptionId = COORDINATOR.createSubscription();
-        // Add this contract as a consumer of its own subscription.
-        COORDINATOR.addConsumer(s_subscriptionId, consumers[0]);
-        setInitialIndex();
-    }
-
-    // Assumes the subscription is funded sufficiently.
-    function requestRandomId() public onlyOwner returns (uint256) {
-        // Will revert if subscription is not set and funded.
-        return
-            s_requestId = COORDINATOR.requestRandomWords(
-                keyHash,
-                s_subscriptionId,
-                requestConfirmations,
-                callbackGasLimit,
-                numWords
-            );
-    }
-
-    function fulfillRandomWords(
-        uint256, /* requestId */
-        uint256[] memory randomWords
-    ) internal override {
-        s_randomWords = randomWords;
-    }
-
-    function _baseURI() internal view virtual override returns (string memory) {
-        return baseURI;
+    modifier isQualified() {
+        require(isSalesActive == true, "No ongoing sales");
+        require(msg.sender != s_owner, "Owner cannot purchase");
+        require(msg.value >= boxPrice * 1 ether, "Insufficient balance!");
+        _;
     }
 
     function setBaseURI(string memory _newBaseURI) public onlyOwner {
         baseURI = _newBaseURI;
     }
 
-    function safeMint(
-        address to,
-        uint256 tokenId,
-        string memory uri
-    ) public onlyOwner {
-        _safeMint(to, tokenId);
-        _setTokenURI(tokenId, uri);
+    function _baseURI() internal view virtual override returns (string memory) {
+        return baseURI;
+    }
+
+    function addNewBoxes(uint256 balance) public onlyOwner {
+        batchGroups[batchCount] = BatchGroup(
+            batchCount + 1,
+            balance,
+            balance,
+            false
+        );
+        totalBoxes += balance;
+        batchCount++;
+    }
+
+    function setBoxPrice(uint256 price) public onlyOwner {
+        boxPrice = price;
+    }
+
+    function setSalesActive(bool isActive) public onlyOwner {
+        if (isActive == true) {
+            require(boxPrice > 0, "Box price is not set");
+            isSalesActive = isActive;
+        } else {
+            isSalesActive = isActive;
+        }
+    }
+
+    function checkTotalBoxes() public view returns (uint256) {
+        return totalBoxes;
+    }
+
+    function revealBlindBox(uint256 batchNumber) public payable onlyOwner {
+        require(batchGroups[batchNumber - 1].quantity != 0, "Batch not found");
+        require(
+            batchGroups[batchNumber - 1].stock == 0,
+            "Blind box not sold out yet"
+        );
+        if (_initialIndex == 0) {
+            s_requestId = COORDINATOR.requestRandomWords(
+                s_keyHash,
+                s_subscriptionId,
+                s_requestConfirmations,
+                s_callbackGasLimit,
+                s_numWords
+            );
+            setStartingIndex();
+        }
+        batchGroups[batchNumber - 1].isReveal = true;
+    }
+
+    function getBatchIdentifier(uint256 tokenId)
+        internal
+        view
+        onlyOwner
+        returns (uint256)
+    {
+        for (uint256 i = 0; i < batchCount; i++) {
+            if (tokenId <= batchGroups[i].quantity) {
+                return batchGroups[i].batchId;
+                break;
+            }
+        }
+    }
+
+    function purchaseBlindBox(address _to) public payable isQualified {
+        require(_tokenIdCounter.current() < totalBoxes, "Sales ended");
+        uint256 newTokenId = _tokenIdCounter.current();
+        _tokenIdCounter.increment();
+        if (newTokenId == totalBoxes) {
+            emit SoldOut(totalBoxes, block.timestamp);
+        }
+        batchGroups[batchCount - 1].stock -= 1;
+        _safeMint(_to, newTokenId);
     }
 
     // The following functions are overrides required by Solidity.
-
-    function _beforeTokenTransfer(
-        address from,
-        address to,
-        uint256 tokenId
-    ) internal override(ERC721, ERC721Enumerable) {
-        super._beforeTokenTransfer(from, to, tokenId);
-    }
 
     function _burn(uint256 tokenId)
         internal
         override(ERC721, ERC721URIStorage)
     {
         super._burn(tokenId);
-    }
-
-    uint256 private _initialIndex;
-
-    function setInitialIndex() public payable onlyOwner {
-        require(_initialIndex == 0, "Starting index is already set");
-
-        _initialIndex = s_requestId % MAX_TOKENS_SUPPLY;
-
-        if (_initialIndex == 0) {
-            _initialIndex = _initialIndex.add(1);
-        }
     }
 
     function tokenURI(uint256 tokenId)
@@ -166,200 +173,42 @@ contract MetaBlindBox is
         );
         string memory currentBaseURI = _baseURI();
         string memory seqId;
-        if (tokenId <= MAX_FIRST_BATCH) {
-            if (
-                _first_batch_reveal_date != 0 &&
-                block.timestamp >= _first_batch_reveal_date
-            ) {
-                return
-                    bytes(currentBaseURI).length > 0
-                        ? string(
-                            abi.encodePacked(
-                                currentBaseURI,
-                                Strings.toString(tokenId),
-                                baseExtension
-                            )
-                        )
-                        : "";
-            } else {
-                if (block.timestamp >= firstReleaseDate) {
-                    seqId = Strings.toString(
-                        (tokenId + _initialIndex) % MAX_FIRST_BATCH
-                    );
-                    return
-                        bytes(currentBaseURI).length > 0
-                            ? string(
-                                abi.encodePacked(
-                                    currentBaseURI,
-                                    seqId,
-                                    baseExtension
-                                )
-                            )
-                            : "";
-                }
-                return
-                    bytes(currentBaseURI).length > 0
-                        ? string(
-                            abi.encodePacked(
-                                currentBaseURI,
-                                "-1",
-                                baseExtension
-                            )
-                        )
-                        : "";
-            }
-        } else if (tokenId > MAX_FIRST_BATCH && tokenId < MAX_SEC_BATCH) {
-            if (
-                _sec_batch_reveal_date != 0 &&
-                block.timestamp >= _sec_batch_reveal_date
-            ) {
-                return
-                    bytes(currentBaseURI).length > 0
-                        ? string(
-                            abi.encodePacked(
-                                currentBaseURI,
-                                Strings.toString(tokenId),
-                                baseExtension
-                            )
-                        )
-                        : "";
-            } else {
-                if (block.timestamp >= secReleaseDate) {
-                    seqId = Strings.toString(
-                        (tokenId + _initialIndex) %
-                            (MAX_FIRST_BATCH + MAX_SEC_BATCH)
-                    );
-                    return
-                        bytes(currentBaseURI).length > 0
-                            ? string(
-                                abi.encodePacked(
-                                    currentBaseURI,
-                                    seqId,
-                                    baseExtension
-                                )
-                            )
-                            : "";
-                }
-                return
-                    bytes(currentBaseURI).length > 0
-                        ? string(
-                            abi.encodePacked(
-                                currentBaseURI,
-                                "-1",
-                                baseExtension
-                            )
-                        )
-                        : "";
-            }
+        uint256 batchId = getBatchIdentifier(tokenId);
+        if (batchGroups[batchId - 1].isReveal == false) {
+            return
+                bytes(baseURI).length > 0
+                    ? string(
+                        abi.encodePacked(currentBaseURI, "-1", baseExtension)
+                    )
+                    : "";
         } else {
-            if (
-                _third_batch_reveal_date != 0 &&
-                block.timestamp >= _third_batch_reveal_date
-            ) {
-                return
-                    bytes(currentBaseURI).length > 0
-                        ? string(
-                            abi.encodePacked(
-                                currentBaseURI,
-                                Strings.toString(tokenId),
-                                baseExtension
-                            )
-                        )
-                        : "";
-            } else {
-                if (block.timestamp >= thirdReleaseDate) {
-                    seqId = Strings.toString(
-                        (tokenId + _initialIndex) % MAX_TOKENS_SUPPLY
-                    );
-                    return
-                        bytes(currentBaseURI).length > 0
-                            ? string(
-                                abi.encodePacked(
-                                    currentBaseURI,
-                                    seqId,
-                                    baseExtension
-                                )
-                            )
-                            : "";
-                }
-                return
-                    bytes(currentBaseURI).length > 0
-                        ? string(
-                            abi.encodePacked(
-                                currentBaseURI,
-                                "-1",
-                                baseExtension
-                            )
-                        )
-                        : "";
-            }
+            seqId = Strings.toString(
+                (tokenId + _initialIndex) % batchGroups[batchId - 1].quantity
+            );
+            return
+                bytes(baseURI).length > 0
+                    ? string(
+                        abi.encodePacked(currentBaseURI, seqId, baseExtension)
+                    )
+                    : "";
         }
     }
 
-    function supportsInterface(bytes4 interfaceId)
-        public
-        view
-        override(ERC721, ERC721Enumerable)
-        returns (bool)
+    function setStartingIndex() public onlyOwner {
+        require(_initialIndex == 0, "Starting index is already set");
+
+        _initialIndex = s_requestId % totalBoxes;
+
+        if (_initialIndex == 0) {
+            _initialIndex = _initialIndex.add(1);
+        }
+        isReveal == true;
+    }
+
+    function fulfillRandomWords(uint256, uint256[] memory randomWords)
+        internal
+        override
     {
-        return super.supportsInterface(interfaceId);
-    }
-
-    function payToMint(address _to) public payable {
-        uint256 availableSupply;
-        if (block.timestamp >= firstReleaseDate) {
-            availableSupply = MAX_FIRST_BATCH;
-        }
-        if (block.timestamp >= secReleaseDate) {
-            availableSupply = MAX_FIRST_BATCH + MAX_SEC_BATCH;
-        }
-        if (block.timestamp >= thirdReleaseDate) {
-            availableSupply = MAX_FIRST_BATCH + MAX_SEC_BATCH + MAX_THIRD_BATCH;
-        }
-        require(_tokenIdCounter.current() < availableSupply, "Sales ended");
-        // uint256 randomIndex = (requestRandomId() % availableSupply) + 1;
-
-        // uint256 newTokenId = _randomTokenNumber[randomIndex];
-
-        // _randomTokenNumber[randomIndex] = _randomTokenNumber[
-        //     _randomTokenNumber.length - 1
-        // ];
-
-        // _randomTokenNumber.pop();
-        uint256 newTokenId = _tokenIdCounter.current();
-        _tokenIdCounter.increment();
-        _safeMint(_to, newTokenId);
-
-        if (newTokenId <= MAX_FIRST_BATCH) {
-            _sold_first_batch_count += 1;
-            if (_sold_first_batch_count == MAX_FIRST_BATCH) {
-                _first_batch_reveal_date = block.timestamp + 3 days;
-            }
-        } else if (newTokenId > MAX_FIRST_BATCH && newTokenId < MAX_SEC_BATCH) {
-            _sold_sec_batch_count += 1;
-            if (_sold_sec_batch_count == MAX_SEC_BATCH) {
-                _sec_batch_reveal_date = block.timestamp + 3 days;
-            }
-        } else {
-            _sold_third_batch_count += 1;
-            if (_sold_third_batch_count == MAX_THIRD_BATCH) {
-                _third_batch_reveal_date = block.timestamp + 3 days;
-            }
-        }
-    }
-
-    function walletOfOwner(address _owner)
-        external
-        view
-        returns (uint256[] memory)
-    {
-        uint256 tokenCount = balanceOf(_owner);
-
-        uint256[] memory tokensId = new uint256[](tokenCount);
-        for (uint256 i = 0; i < tokenCount; i++) {
-            tokensId[i] = tokenOfOwnerByIndex(_owner, i);
-        }
-
-        return tokensId;
+        s_randomWords = randomWords;
     }
 }
