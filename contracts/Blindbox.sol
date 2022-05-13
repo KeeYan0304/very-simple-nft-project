@@ -10,7 +10,7 @@ import "@chainlink/contracts/src/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
 import "@chainlink/contracts/src/v0.8/VRFConsumerBaseV2.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
 
-contract NewMetaBox is ERC721, ERC721URIStorage, Ownable, VRFConsumerBaseV2 {
+contract MetaBlindBox is ERC721, ERC721URIStorage, Ownable, VRFConsumerBaseV2 {
     using Counters for Counters.Counter;
     using SafeMath for uint256;
 
@@ -54,8 +54,8 @@ contract NewMetaBox is ERC721, ERC721URIStorage, Ownable, VRFConsumerBaseV2 {
         address link,
         bytes32 keyHash,
         string memory _name,
-        string memory _symbol
-    ) VRFConsumerBaseV2(vrfCoordinator) ERC721(_name, _symbol) {
+        string memory _symbol 
+    ) VRFConsumerBaseV2(vrfCoordinator) ERC721(_name, _symbol)  {
         batchCount = 0;
         _tokenIdCounter.increment(); //starts with 1
         COORDINATOR = VRFCoordinatorV2Interface(vrfCoordinator);
@@ -87,7 +87,7 @@ contract NewMetaBox is ERC721, ERC721URIStorage, Ownable, VRFConsumerBaseV2 {
             balance,
             false
         );
-        totalBoxes += balance;
+        totalBoxes = totalBoxes.add(balance);
         batchCount++;
     }
 
@@ -127,18 +127,13 @@ contract NewMetaBox is ERC721, ERC721URIStorage, Ownable, VRFConsumerBaseV2 {
         batchGroups[batchNumber - 1].isReveal = true;
     }
 
-    function getBatchIdentifier(uint256 tokenId)
-        internal
-        view
-        onlyOwner
-        returns (uint256)
-    {
+    function getBatchIdentifier(uint256 tokenId) internal view onlyOwner returns (uint256) {
         for (uint256 i = 0; i < batchCount; i++) {
             if (tokenId <= batchGroups[i].quantity) {
                 return batchGroups[i].batchId;
-                break;
             }
         }
+        return 0;
     }
 
     function purchaseBlindBox(address _to) public payable isQualified {
@@ -148,7 +143,7 @@ contract NewMetaBox is ERC721, ERC721URIStorage, Ownable, VRFConsumerBaseV2 {
         if (newTokenId == totalBoxes) {
             emit SoldOut(totalBoxes, block.timestamp);
         }
-        batchGroups[batchCount - 1].stock -= 1;
+        batchGroups[batchCount - 1].stock.sub(1);
         _safeMint(_to, newTokenId);
     }
 
@@ -174,6 +169,7 @@ contract NewMetaBox is ERC721, ERC721URIStorage, Ownable, VRFConsumerBaseV2 {
         string memory currentBaseURI = _baseURI();
         string memory seqId;
         uint256 batchId = getBatchIdentifier(tokenId);
+        require(batchId != 0, "token id not found");
         if (batchGroups[batchId - 1].isReveal == false) {
             return
                 bytes(baseURI).length > 0
@@ -194,6 +190,7 @@ contract NewMetaBox is ERC721, ERC721URIStorage, Ownable, VRFConsumerBaseV2 {
         }
     }
 
+
     function setStartingIndex() public onlyOwner {
         require(_initialIndex == 0, "Starting index is already set");
 
@@ -205,10 +202,10 @@ contract NewMetaBox is ERC721, ERC721URIStorage, Ownable, VRFConsumerBaseV2 {
         isReveal == true;
     }
 
-    function fulfillRandomWords(uint256, uint256[] memory randomWords)
+    function fulfillRandomWords(uint256, uint256[] memory)
         internal
         override
     {
-        s_randomWords = randomWords;
+       
     }
 }
