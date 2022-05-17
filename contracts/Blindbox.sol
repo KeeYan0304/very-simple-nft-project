@@ -127,7 +127,7 @@ contract MetaBlindBox is ERC721, ERC721URIStorage, Ownable, VRFConsumerBaseV2 {
         batchGroups[batchNumber - 1].isReveal = true;
     }
 
-    function getBatchIdentifier(uint256 tokenId) internal view onlyOwner returns (uint256) {
+    function getBatchIdentifier(uint256 tokenId) internal view returns (uint256) {
         for (uint256 i = 0; i < batchCount; i++) {
             if (tokenId <= batchGroups[i].quantity) {
                 return batchGroups[i].batchId;
