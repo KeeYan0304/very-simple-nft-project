@@ -9,8 +9,9 @@ import "@chainlink/contracts/src/v0.8/interfaces/LinkTokenInterface.sol";
 import "@chainlink/contracts/src/v0.8/interfaces/VRFCoordinatorV2Interface.sol";
 import "@chainlink/contracts/src/v0.8/VRFConsumerBaseV2.sol";
 import "@openzeppelin/contracts/utils/math/SafeMath.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Enumerable.sol";
 
-contract MetaBlindBox is ERC721, ERC721URIStorage, Ownable, VRFConsumerBaseV2 {
+contract MetaBlindBox is ERC721, ERC721URIStorage, ERC721Enumerable, Ownable, VRFConsumerBaseV2 {
     using Counters for Counters.Counter;
     using SafeMath for uint256;
 
@@ -18,7 +19,9 @@ contract MetaBlindBox is ERC721, ERC721URIStorage, Ownable, VRFConsumerBaseV2 {
         uint256 batchId;
         uint256 quantity;
         uint256 stock;
+        uint256 currentTotalCount;
         bool isReveal;
+        string baseURI;
     }
 
     mapping(uint256 => BatchGroup) batchGroups;
@@ -27,12 +30,12 @@ contract MetaBlindBox is ERC721, ERC721URIStorage, Ownable, VRFConsumerBaseV2 {
     event SoldOut(uint256 indexed soldQuantity, uint256 soldOutTimeStamp);
 
     uint256 public totalBoxes;
-    bool public isReveal;
-    string public baseURI;
-    uint256 public boxPrice;
+    string public notRevealURI;
+    uint256 public boxPrice = 0.001 ether;
     bool public isSalesActive;
     uint256 private _initialIndex;
     string public baseExtension = ".json";
+    mapping(address => mapping(uint256 => uint256)) private _ownedTokens;
 
     VRFCoordinatorV2Interface immutable COORDINATOR;
     LinkTokenInterface immutable LINKTOKEN;
@@ -41,8 +44,7 @@ contract MetaBlindBox is ERC721, ERC721URIStorage, Ownable, VRFConsumerBaseV2 {
     uint32 immutable s_callbackGasLimit = 100000;
     uint16 immutable s_requestConfirmations = 3;
     uint32 immutable s_numWords = 1;
-    uint256 public s_requestId;
-    uint256[] public s_randomWords;
+    uint256 private s_requestId;
 
     address s_owner;
 
@@ -54,8 +56,8 @@ contract MetaBlindBox is ERC721, ERC721URIStorage, Ownable, VRFConsumerBaseV2 {
         address link,
         bytes32 keyHash,
         string memory _name,
-        string memory _symbol 
-    ) VRFConsumerBaseV2(vrfCoordinator) ERC721(_name, _symbol)  {
+        string memory _symbol
+    ) VRFConsumerBaseV2(vrfCoordinator) ERC721(_name, _symbol) {
         batchCount = 0;
         _tokenIdCounter.increment(); //starts with 1
         COORDINATOR = VRFCoordinatorV2Interface(vrfCoordinator);
@@ -68,26 +70,29 @@ contract MetaBlindBox is ERC721, ERC721URIStorage, Ownable, VRFConsumerBaseV2 {
     modifier isQualified() {
         require(isSalesActive == true, "No ongoing sales");
         require(msg.sender != s_owner, "Owner cannot purchase");
-        require(msg.value >= boxPrice * 1 ether, "Insufficient balance!");
+        require(msg.value >= boxPrice, "Insufficient balance!");
         _;
     }
 
-    function setBaseURI(string memory _newBaseURI) public onlyOwner {
-        baseURI = _newBaseURI;
+    function setRevealedURI(string memory _newBaseURI) public onlyOwner {
+        batchGroups[batchCount - 1].baseURI = _newBaseURI;
     }
 
-    function _baseURI() internal view virtual override returns (string memory) {
-        return baseURI;
+    function setNotRevealURI(string memory uri) public onlyOwner {
+        notRevealURI = uri;
     }
 
     function addNewBoxes(uint256 balance) public onlyOwner {
-        batchGroups[batchCount] = BatchGroup(
+        totalBoxes = totalBoxes.add(balance);
+        BatchGroup memory batchGroup = BatchGroup(
             batchCount + 1,
             balance,
             balance,
-            false
+            totalBoxes,
+            false,
+            ""
         );
-        totalBoxes = totalBoxes.add(balance);
+        batchGroups[batchCount] = batchGroup;
         batchCount++;
     }
 
@@ -114,6 +119,7 @@ contract MetaBlindBox is ERC721, ERC721URIStorage, Ownable, VRFConsumerBaseV2 {
             batchGroups[batchNumber - 1].stock == 0,
             "Blind box not sold out yet"
         );
+        uint _startIndex;
         if (_initialIndex == 0) {
             s_requestId = COORDINATOR.requestRandomWords(
                 s_keyHash,
@@ -122,29 +128,46 @@ contract MetaBlindBox is ERC721, ERC721URIStorage, Ownable, VRFConsumerBaseV2 {
                 s_callbackGasLimit,
                 s_numWords
             );
-            setStartingIndex();
         }
+        _startIndex = s_requestId % totalBoxes;
+
+        if (_startIndex == 0) {
+            _startIndex = _startIndex.add(1);
+        }
+        _initialIndex = _startIndex;
         batchGroups[batchNumber - 1].isReveal = true;
     }
 
-    function getBatchIdentifier(uint256 tokenId) internal view returns (uint256) {
+    function getBatchIdentifier(uint256 tokenId)
+        private
+        view
+        returns (uint256)
+    {
         for (uint256 i = 0; i < batchCount; i++) {
-            if (tokenId <= batchGroups[i].quantity) {
-                return batchGroups[i].batchId;
+            if (i == 0) {
+                if (tokenId <= batchGroups[i].currentTotalCount) { 
+                    return batchGroups[i].batchId;
+                }
+            } else {
+                if (tokenId >= batchGroups[i-1].currentTotalCount && tokenId <= batchGroups[i].currentTotalCount) {
+                    return batchGroups[i].batchId;
+                }
             }
         }
         return 0;
     }
 
-    function purchaseBlindBox(address _to) public payable isQualified {
-        require(_tokenIdCounter.current() < totalBoxes, "Sales ended");
+    function purchaseBlindBox() public payable isQualified {
+        require(_tokenIdCounter.current() <= totalBoxes, "Sales ended");
         uint256 newTokenId = _tokenIdCounter.current();
         _tokenIdCounter.increment();
         if (newTokenId == totalBoxes) {
             emit SoldOut(totalBoxes, block.timestamp);
         }
-        batchGroups[batchCount - 1].stock.sub(1);
-        _safeMint(_to, newTokenId);
+        batchGroups[batchCount - 1].stock = batchGroups[batchCount - 1]
+            .stock
+            .sub(1);
+        _safeMint(msg.sender, newTokenId);
     }
 
     // The following functions are overrides required by Solidity.
@@ -154,6 +177,22 @@ contract MetaBlindBox is ERC721, ERC721URIStorage, Ownable, VRFConsumerBaseV2 {
         override(ERC721, ERC721URIStorage)
     {
         super._burn(tokenId);
+    }
+
+    function _beforeTokenTransfer(address from, address to, uint256 tokenId)
+        internal
+        override(ERC721, ERC721Enumerable)
+    {
+        super._beforeTokenTransfer(from, to, tokenId);
+    }
+
+    function supportsInterface(bytes4 interfaceId)
+        public
+        view
+        override(ERC721, ERC721Enumerable)
+        returns (bool)
+    {
+        return super.supportsInterface(interfaceId);
     }
 
     function tokenURI(uint256 tokenId)
@@ -166,23 +205,24 @@ contract MetaBlindBox is ERC721, ERC721URIStorage, Ownable, VRFConsumerBaseV2 {
             _exists(tokenId),
             "ERC721Metadata: URI query for nonexistent token"
         );
-        string memory currentBaseURI = _baseURI();
         string memory seqId;
         uint256 batchId = getBatchIdentifier(tokenId);
         require(batchId != 0, "token id not found");
         if (batchGroups[batchId - 1].isReveal == false) {
             return
-                bytes(baseURI).length > 0
+                bytes(notRevealURI).length > 0
                     ? string(
-                        abi.encodePacked(currentBaseURI, "-1", baseExtension)
+                        abi.encodePacked(notRevealURI, "hidden", baseExtension)
                     )
                     : "";
         } else {
+            string memory currentBaseURI = batchGroups[batchId - 1].baseURI;
             seqId = Strings.toString(
-                (tokenId + _initialIndex) % batchGroups[batchId - 1].quantity
+                ((tokenId + _initialIndex) %
+                    batchGroups[batchId - 1].quantity) + 1
             );
             return
-                bytes(baseURI).length > 0
+                bytes(currentBaseURI).length > 0
                     ? string(
                         abi.encodePacked(currentBaseURI, seqId, baseExtension)
                     )
@@ -190,22 +230,23 @@ contract MetaBlindBox is ERC721, ERC721URIStorage, Ownable, VRFConsumerBaseV2 {
         }
     }
 
+    function fulfillRandomWords(uint256, uint256[] memory) internal override {}
 
-    function setStartingIndex() public onlyOwner {
-        require(_initialIndex == 0, "Starting index is already set");
-
-        _initialIndex = s_requestId % totalBoxes;
-
-        if (_initialIndex == 0) {
-            _initialIndex = _initialIndex.add(1);
+    function walletOfOwner(address _owner)
+        public
+        view
+        returns (uint256[] memory)
+    {
+        uint256 ownerTokenCount = balanceOf(_owner);
+        uint256[] memory tokenIds = new uint256[](ownerTokenCount);
+        for (uint256 i; i < ownerTokenCount; i++) {
+            tokenIds[i] = tokenOfOwnerByIndex(_owner, i);
         }
-        isReveal == true;
+        return tokenIds;
     }
 
-    function fulfillRandomWords(uint256, uint256[] memory)
-        internal
-        override
-    {
-       
+    function withdraw() public payable onlyOwner {
+        (bool os, ) = payable(owner()).call{value: address(this).balance}("");
+        require(os);
     }
 }
